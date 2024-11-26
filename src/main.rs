@@ -1,32 +1,54 @@
-use ratatui::crossterm::cursor::SetCursorStyle;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::crossterm::execute;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Style, Stylize};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
-use ratatui::{DefaultTerminal, Frame};
-use std::fmt::Display;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
-use tokio::sync::Mutex;
+use ratatui::{
+    crossterm::{
+        cursor::SetCursorStyle,
+        event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+        execute,
+    },
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Style, Stylize},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs},
+    DefaultTerminal, Frame,
+};
+use std::{
+    fmt::Display,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::sync::{mpsc, Mutex};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod ws;
 
-struct App {
-    url: String,
+struct Tab {
+    name: String,
     input: String,
     /// Position of the cursor in the input string
     char_index: usize,
-    result: QueryResult,
+    query_result: QueryResult,
+}
+
+impl Tab {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            input: String::new(),
+            char_index: 0,
+            query_result: QueryResult::default(),
+        }
+    }
+}
+
+struct App {
+    url: String,
     latency: f32,
     input_mode: InputMode,
     // table_state: TableState,
     action_sender: mpsc::UnboundedSender<Action>,
     res_recv: mpsc::UnboundedReceiver<QueryResult>,
     latency_recv: mpsc::UnboundedReceiver<f32>,
+    tabs: Vec<Tab>,
+    selected_tab: usize,
 }
 
 impl App {
@@ -35,9 +57,11 @@ impl App {
 
         let tick_rate = Duration::from_millis(250);
         let mut last_tick = Instant::now();
+
         loop {
             while let Ok(res) = self.res_recv.try_recv() {
-                self.result = res;
+                let selected_tab = &mut self.tabs[self.selected_tab];
+                selected_tab.query_result = res;
             }
             while let Ok(latency) = self.latency_recv.try_recv() {
                 self.latency = latency;
@@ -48,32 +72,39 @@ impl App {
             if event::poll(timeout)? {
                 if let Event::Key(key) = event::read()? {
                     match self.input_mode {
-                        InputMode::Normal => match key.code {
-                            KeyCode::Char('i') => {
+                        InputMode::Normal => match (key.modifiers, key.code) {
+                            (KeyModifiers::CONTROL, KeyCode::Char('n')) => self.new_tab(),
+                            (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.delete_tab(),
+                            (_, KeyCode::Char('H')) => self.previous_tab(),
+                            (_, KeyCode::Char('L')) => self.next_tab(),
+                            (_, KeyCode::Char('i')) => {
                                 self.input_mode = InputMode::Insert;
                                 self.update_cursor_shape()?;
                             }
-                            KeyCode::Char('a') => {
+                            (_, KeyCode::Char('a')) => {
                                 self.input_mode = InputMode::Insert;
                                 self.update_cursor_shape()?;
-                                if self.char_index < self.input.len() {
-                                    self.char_index += 1;
+                                let selected_tab = &mut self.tabs[self.selected_tab];
+                                if selected_tab.char_index < selected_tab.input.len() {
+                                    selected_tab.char_index += 1;
                                 }
                             }
-                            KeyCode::Char('q') => {
+                            (_, KeyCode::Char('q')) => {
                                 return Ok(());
                             }
-                            KeyCode::Char('0') => {
-                                self.char_index = 0;
+                            (_, KeyCode::Char('0')) => {
+                                let selected_tab = &mut self.tabs[self.selected_tab];
+                                selected_tab.char_index = 0;
                             }
-                            KeyCode::Char('$') => {
-                                self.char_index = self.input.len() - 1;
+                            (_, KeyCode::Char('$')) => {
+                                let selected_tab = &mut self.tabs[self.selected_tab];
+                                selected_tab.char_index = selected_tab.input.len() - 1;
                             }
-                            KeyCode::Char('c') => self.clear_results(),
-                            KeyCode::Char('r') => self.submit_query(),
-                            KeyCode::Left | KeyCode::Char('h') => self.move_cursor_left(),
-                            KeyCode::Right | KeyCode::Char('l') => self.move_cursor_right(),
-                            KeyCode::Char('D') => self.delete_input(),
+                            (_, KeyCode::Char('c')) => self.clear_results(),
+                            (_, KeyCode::Char('r')) => self.submit_query(),
+                            (_, KeyCode::Left | KeyCode::Char('h')) => self.move_cursor_left(),
+                            (_, KeyCode::Right | KeyCode::Char('l')) => self.move_cursor_right(),
+                            (_, KeyCode::Char('D')) => self.delete_input(),
                             _ => {}
                         },
                         InputMode::Insert if key.kind == KeyEventKind::Press => match key.code {
@@ -97,24 +128,11 @@ impl App {
         }
     }
 
-    fn draw(&self, f: &mut Frame) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints(
-                [
-                    Constraint::Length(3),  // Top box height
-                    Constraint::Length(10), // Middle box height
-                    Constraint::Min(0),     // Bottom box takes the rest
-                ]
-                .as_ref(),
-            )
-            .split(f.area());
-
+    fn render_top_bar(&self, f: &mut Frame, chunks: Rect) {
         let top_container = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(32), Constraint::Min(0)].as_ref())
-            .split(chunks[0]);
+            .split(chunks);
 
         // Top box
         let mode_span = Span::styled(
@@ -124,32 +142,50 @@ impl App {
         let latency_span = Span::raw(format!(" | Latency: {}ms", self.latency));
         let misc_line = Line::from(vec![mode_span, latency_span]);
         let misc_block =
-            Paragraph::new(misc_line).block(Block::default().borders(Borders::ALL).title("Misc"));
+            Paragraph::new(misc_line).block(Block::default().borders(Borders::ALL).title(" Misc "));
         f.render_widget(misc_block, top_container[0]);
 
         let url_block = Paragraph::new(format!("Connected to: {}", self.url))
-            .block(Block::default().borders(Borders::ALL).title("Database URL"));
+            .block(Block::default().borders(Borders::ALL).title(" Database "));
         f.render_widget(url_block, top_container[1]);
+    }
 
-        // Middle box
-        let query_block = Paragraph::new(self.input.to_string())
-            .block(Block::default().borders(Borders::ALL).title("SQL Query"));
-        f.render_widget(query_block, chunks[1]);
+    fn render_tabs(&self, f: &mut Frame, chunks: Rect) {
+        let titles = self
+            .tabs
+            .iter()
+            .map(|t| format!(" {} ", t.name).bg(Color::Black));
+
+        let hl_style = Style::default().bg(Color::White).fg(Color::Black);
+        let tabs = Tabs::new(titles)
+            .highlight_style(hl_style)
+            .select(self.selected_tab)
+            .padding("", "")
+            .divider(" ");
+        f.render_widget(tabs, chunks);
+    }
+
+    fn render_query(&self, f: &mut Frame, chunks: Rect) {
+        let selected_tab = &self.tabs[self.selected_tab];
+
+        let query_block = Paragraph::new(selected_tab.input.to_string())
+            .block(Block::default().borders(Borders::ALL).title(" SQL "));
+        f.render_widget(query_block, chunks);
 
         {
-            let input_area = chunks[1];
-            let input_width = input_area.width - 2;
-            let input_lines = wrap_text(&self.input, input_width);
-            let (cursor_x, cursor_y) = calculate_cursor_position(&input_lines, self.char_index);
+            let input_width = chunks.width - 2;
+            let input_lines = wrap_text(&selected_tab.input, input_width);
+            let (cursor_x, cursor_y) =
+                calculate_cursor_position(&input_lines, selected_tab.char_index);
 
-            // Set the cursor position
-            f.set_cursor_position((input_area.x + cursor_x + 1, input_area.y + cursor_y + 1));
+            f.set_cursor_position((chunks.x + cursor_x + 1, chunks.y + cursor_y + 1));
         }
-
-        // Bottom box: Results
-        let results_block = match &self.result {
-            QueryResult::None => Paragraph::new("No results")
-                .block(Block::default().borders(Borders::ALL).title("Results")),
+    }
+    fn render_results(&self, f: &mut Frame, chunks: Rect) {
+        let selected_tab = &self.tabs[self.selected_tab];
+        let results_block = match &selected_tab.query_result {
+            QueryResult::None => Paragraph::new(" No results")
+                .block(Block::default().borders(Borders::ALL).title(" Results ")),
             QueryResult::Table { columns, rows } => {
                 let header_cells = columns
                     .iter()
@@ -175,7 +211,7 @@ impl App {
                             .map(|_| Constraint::Min(10))
                             .collect::<Vec<_>>(),
                     );
-                f.render_widget(table, chunks[2]);
+                f.render_widget(table, chunks);
                 return;
             }
             QueryResult::Error(err) => {
@@ -183,14 +219,36 @@ impl App {
                     .block(Block::default().borders(Borders::ALL).title("Error"))
             }
         };
-        f.render_widget(results_block, chunks[2]);
+        f.render_widget(results_block, chunks);
+    }
+    fn draw(&self, f: &mut Frame) {
+        let main_layout = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(10),
+            Constraint::Min(0),
+        ]);
+
+        let [top_area, tabs_area, query_area, results_area] = main_layout.areas(f.area());
+
+        self.render_tabs(f, tabs_area);
+
+        self.render_top_bar(f, top_area);
+
+        self.render_query(f, query_area);
+
+        self.render_results(f, results_area);
     }
     fn submit_query(&mut self) {
-        if self.input.is_empty() {
+        let selected_tab = &self.tabs[self.selected_tab];
+
+        if selected_tab.input.is_empty() {
             return;
         }
 
-        let _ = self.action_sender.send(Action::Query(self.input.clone()));
+        let _ = self
+            .action_sender
+            .send(Action::Query(selected_tab.input.clone()));
     }
 
     fn update_cursor_shape(&self) -> color_eyre::Result<()> {
@@ -203,35 +261,89 @@ impl App {
         Ok(())
     }
 
+    fn previous_tab(&mut self) {
+        if self.selected_tab > 0 {
+            self.selected_tab -= 1;
+        }
+    }
+    fn next_tab(&mut self) {
+        if self.selected_tab + 1 < self.tabs.len() {
+            self.selected_tab += 1;
+        }
+    }
+
+    fn new_tab(&mut self) {
+        let tab_number = self.tabs.len() + 1;
+        let name = format!("Query {}", tab_number);
+        self.tabs.push(Tab::new(name));
+        self.selected_tab = self.tabs.len() - 1;
+    }
+
+    fn delete_tab(&mut self) {
+        if self.tabs.len() == 1 {
+            return;
+        }
+
+        self.tabs.remove(self.selected_tab);
+
+        if self.selected_tab == 0 {
+            self.selected_tab += 1;
+        } else {
+            self.selected_tab -= 1;
+        }
+
+        self.update_tabs();
+    }
+
+    fn update_tabs(&mut self) {
+        for (i, tab) in self.tabs.iter_mut().enumerate() {
+            tab.name = format!("Query {}", i + 1);
+        }
+    }
+
     fn clear_results(&mut self) {
-        self.result = QueryResult::None;
+        let selected_tab = &mut self.tabs[self.selected_tab];
+        selected_tab.query_result = QueryResult::None;
     }
 
     fn delete_input(&mut self) {
-        self.input.clear();
-        self.char_index = 0;
+        let selected_tab = &mut self.tabs[self.selected_tab];
+        selected_tab.input.clear();
+        selected_tab.char_index = 0;
     }
 
     fn add_char(&mut self, c: char) {
-        self.input.insert(self.char_index, c);
-        self.char_index += 1;
+        let selected_tab = &mut self.tabs[self.selected_tab];
+        selected_tab.input.insert(selected_tab.char_index, c);
+        selected_tab.char_index += 1;
     }
 
     fn delete_char(&mut self) {
-        if self.char_index > 0 {
-            self.input.remove(self.char_index - 1);
-            self.char_index -= 1;
+        let selected_tab = &mut self.tabs[self.selected_tab];
+        if selected_tab.char_index > 0 {
+            selected_tab.input.remove(selected_tab.char_index - 1);
+            selected_tab.char_index -= 1;
         }
     }
 
     fn move_cursor_left(&mut self) {
-        if self.char_index > 0 {
-            self.char_index -= 1;
+        let selected_tab = &mut self.tabs[self.selected_tab];
+
+        if selected_tab.input.is_empty() {
+            return;
+        }
+
+        if selected_tab.char_index > 0 {
+            selected_tab.char_index -= 1;
         }
     }
     fn move_cursor_right(&mut self) {
-        if self.char_index < self.input.len() - 1 {
-            self.char_index += 1;
+        let selected_tab = &mut self.tabs[self.selected_tab];
+        if selected_tab.input.is_empty() {
+            return;
+        }
+        if selected_tab.char_index < selected_tab.input.len() - 1 {
+            selected_tab.char_index += 1;
         }
     }
 }
@@ -246,8 +358,8 @@ enum InputMode {
 impl Display for InputMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InputMode::Normal => write!(f, "Normal"),
-            InputMode::Insert => write!(f, "Insert"),
+            InputMode::Normal => write!(f, " NORMAL "),
+            InputMode::Insert => write!(f, " INSERT "),
         }
     }
 }
@@ -285,18 +397,19 @@ async fn main() -> color_eyre::Result<()> {
     let (result_tx, result_rx) = mpsc::unbounded_channel::<QueryResult>();
     let (latency_tx, latency_rx) = mpsc::unbounded_channel::<f32>();
 
-    let app = App {
-        char_index: 0,
+    let mut app = App {
         url: url.to_string(),
-        input: String::new(),
-        result: QueryResult::default(),
         input_mode: InputMode::default(),
         // table_state: TableState::default(),
         latency: 0.0,
         action_sender: action_tx,
         res_recv: result_rx,
         latency_recv: latency_rx,
+        tabs: vec![],
+        selected_tab: 0,
     };
+    app.new_tab();
+
     let terminal = ratatui::init();
 
     let client_c = client.clone();
@@ -305,7 +418,7 @@ async fn main() -> color_eyre::Result<()> {
             if let Ok(latency) = client_c.lock().await.send_ping().await {
                 let _ = latency_tx.send(latency);
             }
-            tokio::time::sleep(Duration::from_millis(1000)).await;
+            tokio::time::sleep(Duration::from_millis(2000)).await;
         }
     });
     let client = client.clone();
