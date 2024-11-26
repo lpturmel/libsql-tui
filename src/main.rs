@@ -113,7 +113,7 @@ impl App {
                                 selected_tab.char_index = selected_tab.input.len() - 1;
                             }
                             (_, KeyCode::Char('c')) => self.clear_results(),
-                            (_, KeyCode::Char('r')) => self.submit_query(),
+                            (KeyModifiers::CONTROL, KeyCode::Char('r')) => self.submit_query(),
                             (_, KeyCode::Left | KeyCode::Char('h')) => self.move_cursor_left(),
                             (_, KeyCode::Right | KeyCode::Char('l')) => self.move_cursor_right(),
                             (_, KeyCode::Char('D')) => self.delete_input(),

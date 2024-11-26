@@ -25,11 +25,11 @@ database in your Turso account to connect to.
 | `0` | Move cursor to the beginning of the input |
 | `$` | Move cursor to the end of the input |
 | `c` | Clear the results |
-| `r` | Submit the query |
 | `h` | Move cursor to the left |
 | `l` | Move cursor to the right |
 | `x` | Delete character under cursor |
 | `D` | Clear the query |
+| `Ctrl + r` | Submit the query |
 | `Ctrl + n` | New query tab |
 | `Ctrl + w` | Delete current query tab |
 | `H` | Previous query tab |
