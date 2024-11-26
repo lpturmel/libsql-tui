@@ -275,7 +275,7 @@ async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     let token = std::env::var("LIBSQL_TOKEN").expect("LIBSQL_TOKEN not set");
-    let url = "wss://ask-lp-lpturmel.turso.io";
+    let url = "wss://todos-lpturmel.turso.io";
 
     let mut client = ws::LibSqlClient::connect(url, &token).await?;
 

@@ -21,3 +21,7 @@ A TUI for interacting with [LibSQL](https://github.com/tursodatabase/libsql).
 | `h` | Move cursor to the left |
 | `l` | Move cursor to the right |
 | `D` | Clear the query |
+
+## Screenshot
+
+![Screenshot](screenshot.jpg)
