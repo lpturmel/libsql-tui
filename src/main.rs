@@ -81,6 +81,17 @@ impl App {
                                 self.input_mode = InputMode::Insert;
                                 self.update_cursor_shape()?;
                             }
+                            (_, KeyCode::Char('A')) => {
+                                self.input_mode = InputMode::Insert;
+                                self.update_cursor_shape()?;
+
+                                let selected_tab = &mut self.tabs[self.selected_tab];
+                                if selected_tab.char_index < selected_tab.input.len() {
+                                    selected_tab.char_index = selected_tab.input.len();
+                                }
+                            }
+                            (_, KeyCode::Char('b')) => self.move_last(),
+                            (_, KeyCode::Char('w')) => self.move_next(),
                             (_, KeyCode::Char('a')) => {
                                 self.input_mode = InputMode::Insert;
                                 self.update_cursor_shape()?;
@@ -115,6 +126,11 @@ impl App {
                             KeyCode::Esc => {
                                 self.input_mode = InputMode::Normal;
                                 self.update_cursor_shape()?;
+
+                                let selected_tab = &mut self.tabs[self.selected_tab];
+                                if selected_tab.char_index > 0 {
+                                    selected_tab.char_index -= 1;
+                                }
                             }
                             _ => {}
                         },
@@ -126,6 +142,101 @@ impl App {
                 last_tick = Instant::now();
             }
         }
+    }
+
+    fn is_word_char(c: char) -> bool {
+        c.is_alphanumeric() || c == '_'
+    }
+
+    fn move_next(&mut self) {
+        let selected_tab = &mut self.tabs[self.selected_tab];
+        let input = &selected_tab.input;
+        let input_len = input.len();
+
+        if selected_tab.char_index >= input_len {
+            return;
+        }
+
+        let chars: Vec<char> = input.chars().collect();
+        let mut idx = selected_tab.char_index;
+
+        while idx < chars.len() && chars[idx].is_whitespace() {
+            idx += 1;
+        }
+
+        if idx >= chars.len() {
+            selected_tab.char_index = idx;
+            return;
+        }
+
+        if Self::is_word_char(chars[idx]) {
+            while idx < chars.len() - 1 && Self::is_word_char(chars[idx]) {
+                idx += 1;
+            }
+        } else {
+            while idx < chars.len() - 1
+                && !chars[idx].is_whitespace()
+                && !Self::is_word_char(chars[idx])
+            {
+                idx += 1;
+            }
+        }
+
+        while idx < chars.len() - 1 && chars[idx].is_whitespace() {
+            idx += 1;
+        }
+
+        selected_tab.char_index = idx;
+    }
+
+    fn move_last(&mut self) {
+        let selected_tab = &mut self.tabs[self.selected_tab];
+
+        if selected_tab.char_index == 0 {
+            return;
+        }
+
+        let chars: Vec<char> = selected_tab.input.chars().collect();
+        let mut idx = selected_tab.char_index;
+
+        idx = idx.saturating_sub(1);
+
+        // Skip back over any whitespace characters
+        while idx > 0 && chars[idx].is_whitespace() {
+            idx = idx.saturating_sub(1);
+        }
+
+        if idx == 0 && !chars[idx].is_whitespace() {
+            // At the beginning of the string and not a whitespace
+            selected_tab.char_index = idx;
+            return;
+        }
+
+        // Determine the type of the current character
+        if Self::is_word_char(chars[idx]) {
+            // Skip back over word characters
+            while idx > 0 && Self::is_word_char(chars[idx]) {
+                idx = idx.saturating_sub(1);
+            }
+            // If we stopped at a non-word character and we're not at the start,
+            // move forward to the first character of the word
+            if !Self::is_word_char(chars[idx]) && idx < chars.len() - 1 {
+                idx = idx.saturating_add(1);
+            }
+        } else {
+            // Skip back over non-word, non-whitespace characters (punctuation)
+            while idx > 0 && !chars[idx].is_whitespace() && !Self::is_word_char(chars[idx]) {
+                idx = idx.saturating_sub(1);
+            }
+            // If we stopped at a word character or whitespace, move forward to the first punctuation
+            if (chars[idx].is_whitespace() || Self::is_word_char(chars[idx]))
+                && idx < chars.len() - 1
+            {
+                idx = idx.saturating_add(1);
+            }
+        }
+
+        selected_tab.char_index = idx;
     }
 
     fn render_top_bar(&self, f: &mut Frame, chunks: Rect) {
@@ -485,4 +596,101 @@ fn calculate_cursor_position(lines: &[String], char_index: usize) -> (u16, u16) 
     let x = UnicodeWidthStr::width(last_line) as u16;
     let y = (lines.len() - 1) as u16;
     (x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_app() -> App {
+        let (action_tx, _) = mpsc::unbounded_channel::<Action>();
+        let (_, result_rx) = mpsc::unbounded_channel::<QueryResult>();
+        let (_, latency_rx) = mpsc::unbounded_channel::<f32>();
+
+        App {
+            url: "".to_string(),
+            input_mode: InputMode::default(),
+            // table_state: TableState::default(),
+            latency: 0.0,
+            action_sender: action_tx,
+            res_recv: result_rx,
+            latency_recv: latency_rx,
+            tabs: vec![],
+            selected_tab: 0,
+        }
+    }
+    #[test]
+    fn test_move_next_sql() {
+        let mut app = mock_app();
+
+        let input = "SELECT * FROM todos";
+        let expected = ['S', '*', 'F', 't', 's'];
+        let tab = Tab {
+            name: "Query 1".to_string(),
+            input: input.to_string(),
+            char_index: 0,
+            query_result: QueryResult::default(),
+        };
+        app.tabs.push(tab);
+        let chars = input.chars().collect::<Vec<char>>();
+
+        for (i, e) in expected.iter().enumerate() {
+            let idx = app.tabs[0].char_index;
+            assert_eq!(chars[idx], *e);
+            if i < expected.len() - 1 {
+                app.move_next();
+            }
+        }
+    }
+    #[test]
+    fn test_move_next_code() {
+        let mut app = mock_app();
+
+        let input = ".map(|t| format!(\" {{}} \", t.name)";
+
+        let expected = [
+            '.', 'm', '(', 't', '|', 'f', '!', '{', '"', 't', '.', 'n', ')',
+        ];
+        let tab = Tab {
+            name: "Query 1".to_string(),
+            input: input.to_string(),
+            char_index: 0,
+            query_result: QueryResult::default(),
+        };
+        app.tabs.push(tab);
+        let chars = input.chars().collect::<Vec<char>>();
+
+        for (i, e) in expected.iter().enumerate() {
+            let idx = app.tabs[0].char_index;
+            assert_eq!(chars[idx], *e);
+            if i < expected.len() - 1 {
+                app.move_next();
+            }
+        }
+    }
+    #[test]
+    fn test_move_back_code() {
+        let mut app = mock_app();
+
+        let input = ".map(|t| format!(\" {{}} \", t.name)";
+
+        let expected = [
+            ')', 'n', '.', 't', '"', '{', '!', 'f', '|', 't', '(', 'm', '.',
+        ];
+
+        let tab = Tab {
+            name: "Query 1".to_string(),
+            input: input.to_string(),
+            char_index: input.len(),
+            query_result: QueryResult::default(),
+        };
+        app.tabs.push(tab);
+        let chars = input.chars().collect::<Vec<char>>();
+
+        for e in expected.iter() {
+            app.move_last();
+            let idx = app.tabs[0].char_index;
+            assert_eq!(chars[idx], *e);
+        }
+    }
 }
