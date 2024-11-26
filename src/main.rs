@@ -92,6 +92,7 @@ impl App {
                             }
                             (_, KeyCode::Char('b')) => self.move_last(),
                             (_, KeyCode::Char('w')) => self.move_next(),
+                            (_, KeyCode::Char('x')) => self.delete_next_char(),
                             (_, KeyCode::Char('a')) => {
                                 self.input_mode = InputMode::Insert;
                                 self.update_cursor_shape()?;
@@ -119,10 +120,10 @@ impl App {
                             _ => {}
                         },
                         InputMode::Insert if key.kind == KeyEventKind::Press => match key.code {
-                            KeyCode::Char(c) => self.add_char(c),
+                            KeyCode::Char(c) => self.append_char(c),
                             KeyCode::Left => self.move_cursor_left(),
                             KeyCode::Right => self.move_cursor_right(),
-                            KeyCode::Backspace => self.delete_char(),
+                            KeyCode::Backspace => self.delete_last_char(),
                             KeyCode::Esc => {
                                 self.input_mode = InputMode::Normal;
                                 self.update_cursor_shape()?;
@@ -201,34 +202,26 @@ impl App {
 
         idx = idx.saturating_sub(1);
 
-        // Skip back over any whitespace characters
         while idx > 0 && chars[idx].is_whitespace() {
             idx = idx.saturating_sub(1);
         }
 
         if idx == 0 && !chars[idx].is_whitespace() {
-            // At the beginning of the string and not a whitespace
             selected_tab.char_index = idx;
             return;
         }
 
-        // Determine the type of the current character
         if Self::is_word_char(chars[idx]) {
-            // Skip back over word characters
             while idx > 0 && Self::is_word_char(chars[idx]) {
                 idx = idx.saturating_sub(1);
             }
-            // If we stopped at a non-word character and we're not at the start,
-            // move forward to the first character of the word
             if !Self::is_word_char(chars[idx]) && idx < chars.len() - 1 {
                 idx = idx.saturating_add(1);
             }
         } else {
-            // Skip back over non-word, non-whitespace characters (punctuation)
             while idx > 0 && !chars[idx].is_whitespace() && !Self::is_word_char(chars[idx]) {
                 idx = idx.saturating_sub(1);
             }
-            // If we stopped at a word character or whitespace, move forward to the first punctuation
             if (chars[idx].is_whitespace() || Self::is_word_char(chars[idx]))
                 && idx < chars.len() - 1
             {
@@ -423,17 +416,29 @@ impl App {
         selected_tab.char_index = 0;
     }
 
-    fn add_char(&mut self, c: char) {
+    fn append_char(&mut self, c: char) {
         let selected_tab = &mut self.tabs[self.selected_tab];
         selected_tab.input.insert(selected_tab.char_index, c);
         selected_tab.char_index += 1;
     }
 
-    fn delete_char(&mut self) {
+    fn delete_last_char(&mut self) {
         let selected_tab = &mut self.tabs[self.selected_tab];
         if selected_tab.char_index > 0 {
             selected_tab.input.remove(selected_tab.char_index - 1);
             selected_tab.char_index -= 1;
+        }
+    }
+
+    fn delete_next_char(&mut self) {
+        let selected_tab = &mut self.tabs[self.selected_tab];
+
+        if selected_tab.char_index < selected_tab.input.len() {
+            selected_tab.input.remove(selected_tab.char_index);
+
+            if selected_tab.char_index >= selected_tab.input.len() && selected_tab.char_index > 0 {
+                selected_tab.char_index -= 1;
+            }
         }
     }
 
