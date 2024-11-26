@@ -39,4 +39,4 @@ database in your Turso account to connect to.
 
 ## Screenshot
 
-![Screenshot](screenshot.jpg)
+![Screenshot](screenshot.jpg?)
