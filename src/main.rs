@@ -1,11 +1,10 @@
-use color_eyre::owo_colors::OwoColorize;
 use ratatui::crossterm::cursor::SetCursorStyle;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::crossterm::execute;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Style, Styled, Stylize};
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use ratatui::{DefaultTerminal, Frame};
 use std::fmt::Display;
 use std::sync::Arc;
@@ -23,9 +22,8 @@ struct App {
     char_index: usize,
     result: QueryResult,
     latency: f32,
-    client: Arc<Mutex<ws::LibSqlClient>>,
     input_mode: InputMode,
-    table_state: TableState,
+    // table_state: TableState,
     action_sender: mpsc::UnboundedSender<Action>,
     res_recv: mpsc::UnboundedReceiver<QueryResult>,
     latency_recv: mpsc::UnboundedReceiver<f32>,
@@ -292,9 +290,8 @@ async fn main() -> color_eyre::Result<()> {
         url: url.to_string(),
         input: String::new(),
         result: QueryResult::default(),
-        client: client.clone(),
         input_mode: InputMode::default(),
-        table_state: TableState::default(),
+        // table_state: TableState::default(),
         latency: 0.0,
         action_sender: action_tx,
         res_recv: result_rx,

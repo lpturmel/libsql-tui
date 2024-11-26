@@ -1,8 +1,16 @@
+> [!WARNING]  
+> This project is still in development and is not yet ready for use.
+
 # libsql-tui
 
-A TUI for interacting with [LibSQL](https://github.com/tursodatabase/libsql).
+A query runner TUI for Turso hosted [LibSQL](https://github.com/tursodatabase/libsql) databases.
 
 ## Usage
+
+Since the project is still in development, it only works by compiling it.
+
+The project will also migrate to a CLI interface in the future to specify which
+database in your Turso account to connect to.
 
 `cargo run`
 
