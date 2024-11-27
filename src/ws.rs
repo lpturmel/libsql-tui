@@ -4,6 +4,7 @@ use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::{net::TcpStream, sync::Mutex};
@@ -19,7 +20,7 @@ const HELLO_REQ_ID: i32 = 1;
 
 pub struct LibSqlClient {
     writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    request_id: Arc<Mutex<i32>>,
+    request_id: AtomicI32,
     pending: Arc<Mutex<HashMap<i32, oneshot::Sender<ResponseType>>>>,
 }
 
@@ -36,7 +37,7 @@ impl LibSqlClient {
         let (writer, read) = ws_stream.split();
         let mut client = LibSqlClient {
             writer,
-            request_id: Arc::new(Mutex::new(1)),
+            request_id: AtomicI32::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
         };
         client.spawn_read_loop(read);
@@ -211,10 +212,8 @@ impl LibSqlClient {
     }
 
     async fn next_request_id(&self) -> i32 {
-        let mut counter = self.request_id.lock().await;
-        let request_id = *counter;
-        *counter += 1;
-        request_id
+        self.request_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 }
 

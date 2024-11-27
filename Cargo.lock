@@ -705,7 +705,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcb4d3d38eab6c5239a362fa8bae48c03baf980a6e7079f063942d563ef3533e"
 
 [[package]]
-name = "libsql-tui"
+name = "libtui"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
