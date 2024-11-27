@@ -29,9 +29,9 @@ database in your Turso account to connect to.
 | `l` | Move cursor to the right |
 | `x` | Delete character under cursor |
 | `D` | Clear the query |
-| `Ctrl + r` | Submit the query |
-| `Ctrl + n` | New query tab |
-| `Ctrl + w` | Delete current query tab |
+| `Ctrl` + `r` | Submit the query |
+| `Ctrl` + `n` | New query tab |
+| `Ctrl` + `w` | Delete current query tab |
 | `H` | Previous query tab |
 | `L` | Next query tab |
 | `w` | Move to the next word |
