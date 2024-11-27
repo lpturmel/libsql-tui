@@ -1,13 +1,13 @@
+use dashmap::DashMap;
 use futures::channel::oneshot;
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::atomic::AtomicI32;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async_tls_with_config, MaybeTlsStream, WebSocketStream};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
@@ -21,7 +21,7 @@ const HELLO_REQ_ID: i32 = 1;
 pub struct LibSqlClient {
     writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     request_id: AtomicI32,
-    pending: Arc<Mutex<HashMap<i32, oneshot::Sender<ResponseType>>>>,
+    pending: Arc<DashMap<i32, oneshot::Sender<ResponseType>>>,
 }
 
 impl LibSqlClient {
@@ -38,7 +38,7 @@ impl LibSqlClient {
         let mut client = LibSqlClient {
             writer,
             request_id: AtomicI32::new(1),
-            pending: Arc::new(Mutex::new(HashMap::new())),
+            pending: Arc::new(DashMap::new()),
         };
         client.spawn_read_loop(read);
         client.send_hello(jwt).await?;
@@ -62,7 +62,7 @@ impl LibSqlClient {
                             let response = response_msg.response;
                             let response_type = response_msg.ty;
 
-                            if let Some(tx) = pending_responses.lock().await.remove(&request_id) {
+                            if let Some((_, tx)) = pending_responses.remove(&request_id) {
                                 match response_type.as_str() {
                                     "hello_ok" => {
                                         let _ = tx.send(ResponseType::HelloOk);
@@ -93,7 +93,7 @@ impl LibSqlClient {
                     }
                     Ok(other) => match other {
                         Message::Pong(_) => {
-                            if let Some(tx) = pending_responses.lock().await.remove(&PING_REQ_ID) {
+                            if let Some((_, tx)) = pending_responses.remove(&PING_REQ_ID) {
                                 let _ = tx.send(ResponseType::Pong);
                             }
                         }
@@ -121,7 +121,7 @@ impl LibSqlClient {
             .await?;
 
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(HELLO_REQ_ID, tx);
+        self.pending.insert(HELLO_REQ_ID, tx);
 
         match rx.await? {
             ResponseType::HelloOk => Ok(()),
@@ -147,7 +147,7 @@ impl LibSqlClient {
             .await?;
 
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(request_id, tx);
+        self.pending.insert(request_id, tx);
 
         match rx.await? {
             ResponseType::OpenStreamResp {} => Ok(()),
@@ -161,7 +161,7 @@ impl LibSqlClient {
     pub async fn send_ping(&mut self) -> color_eyre::Result<f32> {
         self.writer.send(Message::Ping(vec![])).await?;
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(PING_REQ_ID, tx);
+        self.pending.insert(PING_REQ_ID, tx);
         let now = Instant::now();
         match rx.await? {
             ResponseType::Pong => Ok(now.elapsed().as_millis() as f32),
@@ -196,11 +196,9 @@ impl LibSqlClient {
             .send(tungstenite::Message::Text(execute_req_text))
             .await?;
 
-        // Prepare a channel to receive the response
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(request_id, tx);
+        self.pending.insert(request_id, tx);
 
-        // Wait for the response
         match rx.await? {
             ResponseType::ExecuteResp { result } => Ok(result),
             ResponseType::Error { message } => Err(color_eyre::eyre::eyre!("{}", message)),
