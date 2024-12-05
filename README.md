@@ -24,7 +24,7 @@ git clone https://github.com/lpturmel/libsql-tui
 cargo build --release
 ```
 
-3. Add the binary to your path or run it directly
+3. Add the binary to your `PATH` or run it directly
 
 ```
 ./target/release/libsqltui
