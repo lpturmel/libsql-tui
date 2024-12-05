@@ -13,9 +13,26 @@ Since the project is still in development, it only works by compiling it.
 
 To use the app, you need to have the [turso cli](https://docs.turso.tech/cli/installation) installed and configured on your system.
 
-Run `turso login` to login to your account.
+1. Login to your account
 
-Then, to populate the config with your databases, run `turso db list` and connect to a database `turso db shell DB_NAME` this will create a token which the TUI can use to connect.
+
+ ```
+ turso login
+ ```
+
+2. Populate the config with your databases
+
+```
+turso db list
+```
+
+3. Connect to a database
+
+Generate a token for the database you want to connect to
+
+```
+turso db shell DB_NAME
+```
 
 ## Key Bindings
 
