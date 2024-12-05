@@ -17,7 +17,7 @@ To use the app, you need to have the [turso cli](https://docs.turso.tech/cli/ins
 
 
  ```
- turso login
+ turso auth login
  ```
 
 2. Populate the config with your databases
