@@ -25,7 +25,7 @@ pub struct LibSqlClient {
 }
 
 impl LibSqlClient {
-    pub async fn connect(url: &str, jwt: &str) -> color_eyre::Result<Self> {
+    pub async fn connect(url: &str, jwt: &str) -> anyhow::Result<Self> {
         #![allow(unused_mut)]
         let mut request = url.into_client_request()?;
         request.headers_mut().append(
@@ -110,7 +110,7 @@ impl LibSqlClient {
         });
     }
     /// This is the first handshake made to the server to authenticate the client.
-    async fn send_hello(&mut self, jwt: &str) -> color_eyre::Result<()> {
+    async fn send_hello(&mut self, jwt: &str) -> anyhow::Result<()> {
         let hello_msg = HelloMsg {
             ty: "hello".to_string(),
             jwt: jwt.to_string(),
@@ -126,12 +126,12 @@ impl LibSqlClient {
 
         match rx.await? {
             ResponseType::HelloOk => Ok(()),
-            _ => Err(color_eyre::eyre::eyre!("Unexpected response for hello")),
+            _ => Err(anyhow::anyhow!("Unexpected response for hello")),
         }
     }
 
     /// In order to execute statements, a stream needs to be active.
-    pub async fn open_stream(&mut self, stream_id: i32) -> color_eyre::Result<()> {
+    pub async fn open_stream(&mut self, stream_id: i32) -> anyhow::Result<()> {
         let request_id = self.next_request_id().await;
 
         let open_stream_req = OpenStreamReq {
@@ -153,9 +153,7 @@ impl LibSqlClient {
 
         match rx.await? {
             ResponseType::OpenStreamResp {} => Ok(()),
-            _ => Err(color_eyre::eyre::eyre!(
-                "Unexpected response for open_stream"
-            )),
+            _ => Err(anyhow::anyhow!("Unexpected response for open_stream")),
         }
     }
 

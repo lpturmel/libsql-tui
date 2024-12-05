@@ -54,7 +54,7 @@ struct App {
 }
 
 impl App {
-    pub fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
+    pub fn run(mut self, mut terminal: DefaultTerminal) -> anyhow::Result<()> {
         self.update_cursor_shape()?;
 
         let tick_rate = Duration::from_millis(250);
@@ -369,7 +369,7 @@ impl App {
             .send(Action::Query(selected_tab.input.clone()));
     }
 
-    fn update_cursor_shape(&self) -> color_eyre::Result<()> {
+    fn update_cursor_shape(&self) -> anyhow::Result<()> {
         let cursor = match self.input_mode {
             InputMode::Normal => SetCursorStyle::SteadyBlock,
             InputMode::Insert => SetCursorStyle::SteadyBar,
@@ -510,29 +510,28 @@ enum Action {
 }
 
 #[tokio::main]
-async fn main() -> color_eyre::Result<()> {
+async fn main() {
+    if let Err(e) = run().await {
+        eprintln!("\x1b[31m{}\x1b[0m", e);
+        std::process::exit(1);
+    }
+}
+async fn run() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
-    color_eyre::install()?;
 
     let config = config::load_config()?;
 
     let db = select_database(&config)?;
 
-    let db_tokens = config
-        .cache
-        .database_token
-        .as_ref()
-        .ok_or(color_eyre::eyre::eyre!(
+    let db_tokens = config.cache.database_token.as_ref().ok_or(anyhow::anyhow!(
         "No database tokens found in config, use `turso db shell DB_NAME` to populate the config",
     ))?;
 
-    let db_token = db_tokens
-        .get(db.db_id.as_str())
-        .ok_or(color_eyre::eyre::eyre!(
-            "No database token found for {}, use `turso db shell {}` to populate the config",
-            db.name,
-            db.name
-        ))?;
+    let db_token = db_tokens.get(db.db_id.as_str()).ok_or(anyhow::anyhow!(
+        "No database token found for {}, use `turso db shell {}` to populate the config",
+        db.name,
+        db.name
+    ))?;
     let url = format!("wss://{}", db.hostname);
 
     let mut client = ws::LibSqlClient::connect(&url, &db_token.data).await?;

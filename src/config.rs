@@ -1,3 +1,4 @@
+use anyhow::Context;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -34,23 +35,19 @@ pub struct DatabaseName {
     pub hostname: String,
 }
 
-pub fn load_config() -> color_eyre::Result<Config> {
-    let path = dirs::config_dir().ok_or(color_eyre::eyre::eyre!("No config dir"))?;
+pub fn load_config() -> anyhow::Result<Config> {
+    let path = dirs::config_dir().ok_or(anyhow::anyhow!("No config dir"))?;
     let path = path.join(APP_IDENTIFIER);
     let path = path.join("settings.json");
 
-    let config = std::fs::read_to_string(path)?;
+    let config = std::fs::read_to_string(path).context("No Turso config found")?;
     Ok(serde_json::from_str(&config)?)
 }
 
-pub fn select_database(config: &Config) -> color_eyre::Result<&DatabaseName> {
-    let database_names = config
-        .cache
-        .database_names
-        .as_ref()
-        .ok_or(color_eyre::eyre::eyre!(
-            "No database names, please run `turso db list`"
-        ))?;
+pub fn select_database(config: &Config) -> anyhow::Result<&DatabaseName> {
+    let database_names = config.cache.database_names.as_ref().ok_or(anyhow::anyhow!(
+        "No database names, please run `turso db list`"
+    ))?;
     let databases: Vec<&str> = database_names
         .data
         .iter()
