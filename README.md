@@ -2,6 +2,12 @@
 
 A query runner TUI for Turso hosted [LibSQL](https://github.com/tursodatabase/libsql) databases.
 
+## Features
+
+- Query runner
+- Tabbed query editor (with some vim keybinds)
+- Query result viewer
+
 ## Usage
 
 Since the project is still in development, it only works by compiling it.
