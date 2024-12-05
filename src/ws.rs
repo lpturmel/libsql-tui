@@ -158,14 +158,14 @@ impl LibSqlClient {
     }
 
     /// Measure latency in milliseconds
-    pub async fn send_ping(&mut self) -> color_eyre::Result<f32> {
+    pub async fn send_ping(&mut self) -> anyhow::Result<f32> {
         self.writer.send(Message::Ping(vec![])).await?;
         let (tx, rx) = oneshot::channel();
         self.pending.insert(PING_REQ_ID, tx);
         let now = Instant::now();
         match rx.await? {
             ResponseType::Pong => Ok(now.elapsed().as_millis() as f32),
-            _ => Err(color_eyre::eyre::eyre!("Unexpected response for ping")),
+            _ => Err(anyhow::anyhow!("Unexpected response for ping")),
         }
     }
 
@@ -173,7 +173,7 @@ impl LibSqlClient {
         &mut self,
         stream_id: i32,
         sql: &str,
-    ) -> color_eyre::Result<StmtResult> {
+    ) -> anyhow::Result<StmtResult> {
         let request_id = self.next_request_id().await;
 
         let execute_req = ExecuteReq {
@@ -201,11 +201,9 @@ impl LibSqlClient {
 
         match rx.await? {
             ResponseType::ExecuteResp { result } => Ok(result),
-            ResponseType::Error { message } => Err(color_eyre::eyre::eyre!("{}", message)),
+            ResponseType::Error { message } => Err(anyhow::anyhow!("{}", message)),
 
-            _ => Err(color_eyre::eyre::eyre!(
-                "Unexpected response for execute_statement"
-            )),
+            _ => Err(anyhow::anyhow!("Unexpected response for execute_statement")),
         }
     }
 

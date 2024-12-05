@@ -12,7 +12,23 @@ A query runner TUI for Turso hosted [LibSQL](https://github.com/tursodatabase/li
 
 Since the project is still in development, it only works by compiling it.
 
-`cargo run`
+1. Clone the repository
+
+```
+git clone https://github.com/lpturmel/libsql-tui
+```
+
+2. Build the project
+
+```
+cargo build --release
+```
+
+3. Add the binary to your path or run it directly
+
+```
+./target/release/libsqltui
+```
 
 
 ## Configuration
