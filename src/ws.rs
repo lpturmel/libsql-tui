@@ -1,19 +1,19 @@
 use dashmap::DashMap;
-use futures::channel::oneshot;
-use futures::stream::SplitSink;
-use futures::{SinkExt, StreamExt};
+use futures::{channel::oneshot, stream::SplitSink, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
-use std::sync::atomic::AtomicI32;
-use std::sync::Arc;
-use std::time::Instant;
+use std::{
+    fmt::Display,
+    sync::{atomic::AtomicI32, Arc},
+    time::Instant,
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async_tls_with_config, MaybeTlsStream, WebSocketStream};
-use tungstenite::client::IntoClientRequest;
-use tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
-use tungstenite::http::HeaderValue;
-use tungstenite::protocol::WebSocketConfig;
-use tungstenite::Message;
+use tungstenite::{
+    client::IntoClientRequest,
+    http::{header::SEC_WEBSOCKET_PROTOCOL, HeaderValue},
+    protocol::WebSocketConfig,
+    Message,
+};
 
 const PING_REQ_ID: i32 = -1;
 const HELLO_REQ_ID: i32 = 1;
@@ -109,6 +109,7 @@ impl LibSqlClient {
             }
         });
     }
+    /// This is the first handshake made to the server to authenticate the client.
     async fn send_hello(&mut self, jwt: &str) -> color_eyre::Result<()> {
         let hello_msg = HelloMsg {
             ty: "hello".to_string(),
@@ -129,6 +130,7 @@ impl LibSqlClient {
         }
     }
 
+    /// In order to execute statements, a stream needs to be active.
     pub async fn open_stream(&mut self, stream_id: i32) -> color_eyre::Result<()> {
         let request_id = self.next_request_id().await;
 

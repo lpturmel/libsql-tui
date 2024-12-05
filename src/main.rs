@@ -1,3 +1,4 @@
+use self::config::select_database;
 use ratatui::{
     crossterm::{
         cursor::SetCursorStyle,
@@ -7,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs, Wrap},
     DefaultTerminal, Frame,
 };
 use std::{
@@ -18,6 +19,7 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+mod config;
 mod ws;
 
 struct Tab {
@@ -75,6 +77,8 @@ impl App {
                         InputMode::Normal => match (key.modifiers, key.code) {
                             (KeyModifiers::CONTROL, KeyCode::Char('n')) => self.new_tab(),
                             (KeyModifiers::CONTROL, KeyCode::Char('w')) => self.delete_tab(),
+                            (KeyModifiers::CONTROL, KeyCode::Char('r')) => self.submit_query(),
+                            (KeyModifiers::CONTROL, KeyCode::Char('t')) => self.get_tables(),
                             (_, KeyCode::Char('H')) => self.previous_tab(),
                             (_, KeyCode::Char('L')) => self.next_tab(),
                             (_, KeyCode::Char('i')) => {
@@ -113,7 +117,6 @@ impl App {
                                 selected_tab.char_index = selected_tab.input.len() - 1;
                             }
                             (_, KeyCode::Char('c')) => self.clear_results(),
-                            (KeyModifiers::CONTROL, KeyCode::Char('r')) => self.submit_query(),
                             (_, KeyCode::Left | KeyCode::Char('h')) => self.move_cursor_left(),
                             (_, KeyCode::Right | KeyCode::Char('l')) => self.move_cursor_right(),
                             (_, KeyCode::Char('D')) => self.delete_input(),
@@ -124,6 +127,9 @@ impl App {
                             KeyCode::Left => self.move_cursor_left(),
                             KeyCode::Right => self.move_cursor_right(),
                             KeyCode::Backspace => self.delete_last_char(),
+                            KeyCode::Enter => {
+                                self.append_char('\n');
+                            }
                             KeyCode::Esc => {
                                 self.input_mode = InputMode::Normal;
                                 self.update_cursor_shape()?;
@@ -273,7 +279,8 @@ impl App {
         let selected_tab = &self.tabs[self.selected_tab];
 
         let query_block = Paragraph::new(selected_tab.input.to_string())
-            .block(Block::default().borders(Borders::ALL).title(" SQL "));
+            .block(Block::default().borders(Borders::ALL).title(" SQL "))
+            .wrap(Wrap { trim: false });
         f.render_widget(query_block, chunks);
 
         {
@@ -342,6 +349,13 @@ impl App {
         self.render_query(f, query_area);
 
         self.render_results(f, results_area);
+    }
+
+    fn get_tables(&self) {
+        let _ = self.action_sender.send(Action::Query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                .to_string(),
+        ));
     }
     fn submit_query(&mut self) {
         let selected_tab = &self.tabs[self.selected_tab];
@@ -500,10 +514,28 @@ async fn main() -> color_eyre::Result<()> {
     dotenv::dotenv().ok();
     color_eyre::install()?;
 
-    let token = std::env::var("LIBSQL_TOKEN").expect("LIBSQL_TOKEN not set");
-    let url = "wss://todos-lpturmel.turso.io";
+    let config = config::load_config()?;
 
-    let mut client = ws::LibSqlClient::connect(url, &token).await?;
+    let db = select_database(&config)?;
+
+    let db_tokens = config
+        .cache
+        .database_token
+        .as_ref()
+        .ok_or(color_eyre::eyre::eyre!(
+        "No database tokens found in config, use `turso db shell DB_NAME` to populate the config",
+    ))?;
+
+    let db_token = db_tokens
+        .get(db.db_id.as_str())
+        .ok_or(color_eyre::eyre::eyre!(
+            "No database token found for {}, use `turso db shell {}` to populate the config",
+            db.name,
+            db.name
+        ))?;
+    let url = format!("wss://{}", db.hostname);
+
+    let mut client = ws::LibSqlClient::connect(&url, &db_token.data).await?;
 
     client.open_stream(1).await?;
 
@@ -534,7 +566,7 @@ async fn main() -> color_eyre::Result<()> {
             if let Ok(latency) = client_c.lock().await.send_ping().await {
                 let _ = latency_tx.send(latency);
             }
-            tokio::time::sleep(Duration::from_millis(2000)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
     });
     let client = client.clone();
