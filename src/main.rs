@@ -424,11 +424,12 @@ impl App {
 
                 let header_cells = columns
                     .iter()
-                    .map(|h| Cell::from(Text::from(h.to_string())));
+                    .map(|h| Cell::from(Text::from(h.to_uppercase())));
                 let header = Row::new(header_cells).style(
                     ratatui::style::Style::default()
-                        .fg(ratatui::style::Color::Yellow)
-                        .bg(ratatui::style::Color::Black),
+                        .bold()
+                        .fg(ratatui::style::Color::Black)
+                        .bg(ratatui::style::Color::White),
                 );
 
                 let rows = rows.iter().map(|item| {
