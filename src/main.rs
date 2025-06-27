@@ -5,10 +5,10 @@ use ratatui::{
         event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
         execute,
     },
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs, Wrap},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Tabs, Wrap},
     DefaultTerminal, Frame,
 };
 use std::{
@@ -41,14 +41,12 @@ impl Tab {
 
 struct App {
     url: String,
-    // latency: f32,
     input_mode: InputMode,
-    // table_state: TableState,
     action_sender: mpsc::UnboundedSender<Action>,
     res_recv: mpsc::UnboundedReceiver<QueryResult>,
-    // latency_recv: mpsc::UnboundedReceiver<f32>,
     tabs: Vec<Tab>,
     selected_tab: usize,
+    show_help: bool,
 }
 
 impl App {
@@ -80,6 +78,10 @@ impl App {
                                 self.input_mode = InputMode::Insert;
                                 self.update_cursor_shape()?;
                             }
+                            (_, KeyCode::Char('?')) => {
+                                self.show_help = !self.show_help;
+                            }
+                            (_, KeyCode::Esc) if self.show_help => self.show_help = false,
                             (_, KeyCode::Char('A')) => {
                                 self.input_mode = InputMode::Insert;
                                 self.update_cursor_shape()?;
@@ -233,122 +235,6 @@ impl App {
         selected_tab.char_index = idx;
     }
 
-    fn render_top_bar(&self, f: &mut Frame, chunks: Rect) {
-        let top_container = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(32), Constraint::Min(0)].as_ref())
-            .split(chunks);
-
-        // Top box
-        let mode_span = Span::styled(
-            self.input_mode.to_string(),
-            Style::default().bold().bg(Color::Blue).fg(Color::Black),
-        );
-        // let latency_span = Span::raw(format!(" | Latency: {}ms", self.latency));
-        let misc_line = Line::from(vec![mode_span]);
-        let misc_block =
-            Paragraph::new(misc_line).block(Block::default().borders(Borders::ALL).title(" Misc "));
-        f.render_widget(misc_block, top_container[0]);
-
-        let url_block = Paragraph::new(format!("Connected to: {}", self.url))
-            .block(Block::default().borders(Borders::ALL).title(" Database "));
-        f.render_widget(url_block, top_container[1]);
-    }
-
-    fn render_tabs(&self, f: &mut Frame, chunks: Rect) {
-        let titles = self
-            .tabs
-            .iter()
-            .map(|t| format!(" {} ", t.name).bg(Color::Black));
-
-        let hl_style = Style::default().bg(Color::White).fg(Color::Black);
-        let tabs = Tabs::new(titles)
-            .highlight_style(hl_style)
-            .select(self.selected_tab)
-            .padding("", "")
-            .divider(" ");
-        f.render_widget(tabs, chunks);
-    }
-
-    fn render_query(&self, f: &mut Frame, chunks: Rect) {
-        let selected_tab = &self.tabs[self.selected_tab];
-
-        let query_block = Paragraph::new(selected_tab.input.to_string())
-            .block(Block::default().borders(Borders::ALL).title(" SQL "))
-            .wrap(Wrap { trim: false });
-        f.render_widget(query_block, chunks);
-
-        {
-            let input_width = chunks.width - 2;
-            let input_lines = wrap_text(&selected_tab.input, input_width);
-            let (cursor_x, cursor_y) =
-                calculate_cursor_position(&input_lines, selected_tab.char_index);
-
-            f.set_cursor_position((chunks.x + cursor_x + 1, chunks.y + cursor_y + 1));
-        }
-    }
-    fn render_results(&self, f: &mut Frame, chunks: Rect) {
-        let selected_tab = &self.tabs[self.selected_tab];
-        let results_block = match &selected_tab.query_result {
-            QueryResult::None => Paragraph::new(" No results")
-                .block(Block::default().borders(Borders::ALL).title(" Results ")),
-            QueryResult::Table(table) => {
-                let rows = &table.rows;
-                let columns = &table.columns;
-
-                let header_cells = columns
-                    .iter()
-                    .map(|h| Cell::from(Text::from(h.to_string())));
-                let header = Row::new(header_cells).style(
-                    ratatui::style::Style::default()
-                        .fg(ratatui::style::Color::Yellow)
-                        .bg(ratatui::style::Color::Black),
-                );
-
-                let rows = rows.iter().map(|item| {
-                    let cells = item.iter().map(|c| Cell::from(Text::from(c.to_string())));
-                    Row::new(cells)
-                });
-
-                let widths = [Constraint::Length(5), Constraint::Length(5)];
-                let table = Table::new(rows, widths)
-                    .header(header)
-                    .block(Block::default().borders(Borders::ALL).title("Results"))
-                    .widths(
-                        columns
-                            .iter()
-                            .map(|_| Constraint::Min(10))
-                            .collect::<Vec<_>>(),
-                    );
-                f.render_widget(table, chunks);
-                return;
-            }
-            QueryResult::Error(err) => {
-                Paragraph::new(Text::from(err.to_string()).style(Style::default().fg(Color::Red)))
-                    .block(Block::default().borders(Borders::ALL).title("Error"))
-            }
-        };
-        f.render_widget(results_block, chunks);
-    }
-    fn draw(&self, f: &mut Frame) {
-        let main_layout = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Length(1),
-            Constraint::Length(10),
-            Constraint::Min(0),
-        ]);
-
-        let [top_area, tabs_area, query_area, results_area] = main_layout.areas(f.area());
-
-        self.render_tabs(f, tabs_area);
-
-        self.render_top_bar(f, top_area);
-
-        self.render_query(f, query_area);
-
-        self.render_results(f, results_area);
-    }
-
     fn get_tables(&self) {
         let _ = self.action_sender.send(Action::Query(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
@@ -474,6 +360,184 @@ impl App {
             selected_tab.char_index += 1;
         }
     }
+
+    fn render_top_bar(&self, f: &mut Frame, chunks: Rect) {
+        let top_container = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(32), Constraint::Min(0)].as_ref())
+            .split(chunks);
+
+        let mode_span = Span::styled(
+            self.input_mode.to_string(),
+            Style::default().bold().bg(Color::Blue).fg(Color::Black),
+        );
+        let misc_line = Line::from(vec![mode_span]);
+        let misc_block =
+            Paragraph::new(misc_line).block(Block::default().borders(Borders::ALL).title(" Misc "));
+        f.render_widget(misc_block, top_container[0]);
+
+        let url_block = Paragraph::new(format!("Connected to: {}", self.url))
+            .block(Block::default().borders(Borders::ALL).title(" Database "));
+        f.render_widget(url_block, top_container[1]);
+    }
+
+    fn render_tabs(&self, f: &mut Frame, chunks: Rect) {
+        let titles = self
+            .tabs
+            .iter()
+            .map(|t| format!(" {} ", t.name).bg(Color::Black));
+
+        let hl_style = Style::default().bg(Color::White).fg(Color::Black);
+        let tabs = Tabs::new(titles)
+            .highlight_style(hl_style)
+            .select(self.selected_tab)
+            .padding("", "")
+            .divider(" ");
+        f.render_widget(tabs, chunks);
+    }
+
+    fn render_query(&self, f: &mut Frame, chunks: Rect) {
+        let selected_tab = &self.tabs[self.selected_tab];
+
+        let query_block = Paragraph::new(selected_tab.input.to_string())
+            .block(Block::default().borders(Borders::ALL).title(" SQL "))
+            .wrap(Wrap { trim: false });
+        f.render_widget(query_block, chunks);
+
+        {
+            let input_width = chunks.width - 2;
+            let input_lines = wrap_text(&selected_tab.input, input_width);
+            let (cursor_x, cursor_y) =
+                calculate_cursor_position(&input_lines, selected_tab.char_index);
+
+            f.set_cursor_position((chunks.x + cursor_x + 1, chunks.y + cursor_y + 1));
+        }
+    }
+    fn render_results(&self, f: &mut Frame, chunks: Rect) {
+        let selected_tab = &self.tabs[self.selected_tab];
+        let results_block = match &selected_tab.query_result {
+            QueryResult::None => Paragraph::new(" No results")
+                .block(Block::default().borders(Borders::ALL).title(" Results ")),
+            QueryResult::Table(table) => {
+                let rows = &table.rows;
+                let columns = &table.columns;
+
+                let header_cells = columns
+                    .iter()
+                    .map(|h| Cell::from(Text::from(h.to_string())));
+                let header = Row::new(header_cells).style(
+                    ratatui::style::Style::default()
+                        .fg(ratatui::style::Color::Yellow)
+                        .bg(ratatui::style::Color::Black),
+                );
+
+                let rows = rows.iter().map(|item| {
+                    let cells = item.iter().map(|c| Cell::from(Text::from(c.to_string())));
+                    Row::new(cells)
+                });
+
+                let widths = [Constraint::Length(5), Constraint::Length(5)];
+                let table = Table::new(rows, widths)
+                    .header(header)
+                    .block(Block::default().borders(Borders::ALL).title("Results"))
+                    .widths(
+                        columns
+                            .iter()
+                            .map(|_| Constraint::Min(10))
+                            .collect::<Vec<_>>(),
+                    );
+                f.render_widget(table, chunks);
+                return;
+            }
+            QueryResult::Error(err) => {
+                Paragraph::new(Text::from(err.to_string()).style(Style::default().fg(Color::Red)))
+                    .block(Block::default().borders(Borders::ALL).title("Error"))
+            }
+        };
+        f.render_widget(results_block, chunks);
+    }
+
+    fn render_help(&self, f: &mut Frame) {
+        let area = App::popup_area(f.area(), 60, 70);
+        f.render_widget(Clear, area);
+        let block = Block::bordered().title(" Key-binds ");
+        let para = Paragraph::new(App::help_lines())
+            .block(block)
+            .wrap(Wrap { trim: false });
+        f.render_widget(para, area);
+    }
+
+    fn render_footer(&self, f: &mut Frame, area: Rect) {
+        let style = Style::default().fg(Color::Indexed(246));
+        let block = Block::default().border_style(style).borders(Borders::ALL);
+        let para = Paragraph::new(Text::from("? for help | q to quit".to_string()))
+            .block(block)
+            .style(style)
+            .wrap(Wrap { trim: false });
+        f.render_widget(para, area);
+    }
+
+    fn draw(&self, f: &mut Frame) {
+        let main_layout = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(10),
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ]);
+
+        let [top_area, tabs_area, query_area, results_area, footer_area] =
+            main_layout.areas(f.area());
+
+        self.render_tabs(f, tabs_area);
+
+        self.render_top_bar(f, top_area);
+
+        self.render_query(f, query_area);
+
+        self.render_results(f, results_area);
+
+        self.render_footer(f, footer_area);
+
+        if self.show_help {
+            self.render_help(f);
+        }
+    }
+}
+
+impl App {
+    fn help_lines() -> Vec<Line<'static>> {
+        vec![
+            Line::from(vec![Span::styled(" NORMAL mode", Style::default().bold())]),
+            Line::from(" i      → insert mode"),
+            Line::from(" a      → append & insert mode"),
+            Line::from(" w / b  → next / previous word"),
+            Line::from(" h / l  → move cursor"),
+            Line::from(" x      → delete char"),
+            Line::from(" 0 / $  → begin / end of line"),
+            Line::from(" D      → clear query"),
+            Line::from(" c      → clear results"),
+            Line::from(" Ctrl-r → run query"),
+            Line::from(" Ctrl-n → new tab"),
+            Line::from(" Ctrl-w → close tab"),
+            Line::from(" Ctrl-t → list tables"),
+            Line::from(" H / L  → prev / next tab"),
+            Line::from(" q      → quit"),
+            Line::from(" ?      → toggle this help"),
+            Line::from(""),
+            Line::from(" Press Esc or ? to close"),
+            Line::from(""),
+            Line::from(vec![Span::styled(" INSERT mode", Style::default().bold())]),
+            Line::from(" Esc      → normal mode"),
+        ]
+    }
+    fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
+        let vertical = Layout::vertical([Constraint::Percentage(percent_y)]).flex(Flex::Center);
+        let horizontal = Layout::horizontal([Constraint::Percentage(percent_x)]).flex(Flex::Center);
+        let [area] = vertical.areas(area);
+        let [area] = horizontal.areas(area);
+        area
+    }
 }
 
 #[derive(Default, PartialEq, Eq)]
@@ -546,6 +610,7 @@ async fn run() -> anyhow::Result<()> {
         res_recv: result_rx,
         tabs: vec![],
         selected_tab: 0,
+        show_help: false,
     };
     app.new_tab();
 
@@ -628,6 +693,7 @@ mod tests {
             res_recv: result_rx,
             tabs: vec![],
             selected_tab: 0,
+            show_help: false,
         }
     }
     #[test]
