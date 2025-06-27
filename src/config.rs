@@ -5,6 +5,7 @@ use std::collections::HashMap;
 const APP_IDENTIFIER: &str = "turso";
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct Config {
     pub username: String,
     pub cache: Cache,
@@ -15,6 +16,7 @@ pub struct Cache {
     pub database_token: Option<HashMap<String, DatabaseToken>>,
 }
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct DatabaseToken {
     pub expiration: u64,
     pub data: String,
