@@ -13,19 +13,17 @@ use ratatui::{
 };
 use std::{
     fmt::Display,
-    sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod config;
-mod ws;
+mod db;
 
 struct Tab {
     name: String,
     input: String,
-    /// Position of the cursor in the input string
     char_index: usize,
     query_result: QueryResult,
 }
@@ -43,12 +41,12 @@ impl Tab {
 
 struct App {
     url: String,
-    latency: f32,
+    // latency: f32,
     input_mode: InputMode,
     // table_state: TableState,
     action_sender: mpsc::UnboundedSender<Action>,
     res_recv: mpsc::UnboundedReceiver<QueryResult>,
-    latency_recv: mpsc::UnboundedReceiver<f32>,
+    // latency_recv: mpsc::UnboundedReceiver<f32>,
     tabs: Vec<Tab>,
     selected_tab: usize,
 }
@@ -64,9 +62,6 @@ impl App {
             while let Ok(res) = self.res_recv.try_recv() {
                 let selected_tab = &mut self.tabs[self.selected_tab];
                 selected_tab.query_result = res;
-            }
-            while let Ok(latency) = self.latency_recv.try_recv() {
-                self.latency = latency;
             }
             terminal.draw(|f| self.draw(f))?;
 
@@ -249,8 +244,8 @@ impl App {
             self.input_mode.to_string(),
             Style::default().bold().bg(Color::Blue).fg(Color::Black),
         );
-        let latency_span = Span::raw(format!(" | Latency: {}ms", self.latency));
-        let misc_line = Line::from(vec![mode_span, latency_span]);
+        // let latency_span = Span::raw(format!(" | Latency: {}ms", self.latency));
+        let misc_line = Line::from(vec![mode_span]);
         let misc_block =
             Paragraph::new(misc_line).block(Block::default().borders(Borders::ALL).title(" Misc "));
         f.render_widget(misc_block, top_container[0]);
@@ -297,7 +292,10 @@ impl App {
         let results_block = match &selected_tab.query_result {
             QueryResult::None => Paragraph::new(" No results")
                 .block(Block::default().borders(Borders::ALL).title(" Results ")),
-            QueryResult::Table { columns, rows } => {
+            QueryResult::Table(table) => {
+                let rows = &table.rows;
+                let columns = &table.columns;
+
                 let header_cells = columns
                     .iter()
                     .map(|h| Cell::from(Text::from(h.to_string())));
@@ -497,10 +495,7 @@ impl Display for InputMode {
 enum QueryResult {
     #[default]
     None,
-    Table {
-        columns: Vec<ws::Column>,
-        rows: Vec<Vec<ws::LibSqlValue>>,
-    },
+    Table(db::Table),
     Error(String),
 }
 
@@ -532,26 +527,23 @@ async fn run() -> anyhow::Result<()> {
         db.name,
         db.name
     ))?;
-    let url = format!("wss://{}", db.hostname);
+    let url = format!("libsql://{}", db.hostname);
 
-    let mut client = ws::LibSqlClient::connect(&url, &db_token.data).await?;
+    let db = libsql::Builder::new_remote(url.clone(), db_token.data.clone())
+        .build()
+        .await?;
+    let conn = db.connect()?;
 
-    client.open_stream(1).await?;
-
-    let client = Arc::new(Mutex::new(client));
+    let client = db::LibSqlClient(conn);
 
     let (action_tx, mut action_rx) = mpsc::unbounded_channel::<Action>();
     let (result_tx, result_rx) = mpsc::unbounded_channel::<QueryResult>();
-    let (latency_tx, latency_rx) = mpsc::unbounded_channel::<f32>();
 
     let mut app = App {
         url: url.to_string(),
         input_mode: InputMode::default(),
-        // table_state: TableState::default(),
-        latency: 0.0,
         action_sender: action_tx,
         res_recv: result_rx,
-        latency_recv: latency_rx,
         tabs: vec![],
         selected_tab: 0,
     };
@@ -559,27 +551,14 @@ async fn run() -> anyhow::Result<()> {
 
     let terminal = ratatui::init();
 
-    let client_c = client.clone();
-    tokio::spawn(async move {
-        loop {
-            if let Ok(latency) = client_c.lock().await.send_ping().await {
-                let _ = latency_tx.send(latency);
-            }
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        }
-    });
     let client = client.clone();
     tokio::spawn(async move {
         while let Some(action) = action_rx.recv().await {
             match action {
                 Action::Query(query) => {
-                    let mut client = client.lock().await;
-                    let result = client.execute_statement(1, &query).await;
-                    let res = match result {
-                        Ok(res) => QueryResult::Table {
-                            columns: res.cols,
-                            rows: res.rows,
-                        },
+                    let res = client.query_owned(&query).await;
+                    let res = match res {
+                        Ok(table) => QueryResult::Table(table),
                         Err(err) => QueryResult::Error(err.to_string()),
                     };
                     let _ = result_tx.send(res);
@@ -641,16 +620,12 @@ mod tests {
     fn mock_app() -> App {
         let (action_tx, _) = mpsc::unbounded_channel::<Action>();
         let (_, result_rx) = mpsc::unbounded_channel::<QueryResult>();
-        let (_, latency_rx) = mpsc::unbounded_channel::<f32>();
 
         App {
             url: "".to_string(),
             input_mode: InputMode::default(),
-            // table_state: TableState::default(),
-            latency: 0.0,
             action_sender: action_tx,
             res_recv: result_rx,
-            latency_recv: latency_rx,
             tabs: vec![],
             selected_tab: 0,
         }

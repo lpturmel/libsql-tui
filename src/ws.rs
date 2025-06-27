@@ -1,3 +1,4 @@
+use anyhow::Context;
 use dashmap::DashMap;
 use futures::{channel::oneshot, stream::SplitSink, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -30,7 +31,7 @@ impl LibSqlClient {
         let mut request = url.into_client_request()?;
         request.headers_mut().append(
             SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_str("hrana3").unwrap(),
+            HeaderValue::from_str("hrana1").unwrap(),
         );
         let config = Some(WebSocketConfig::default());
         let (ws_stream, _) = connect_async_tls_with_config(request, config, false, None).await?;
@@ -118,7 +119,7 @@ impl LibSqlClient {
 
         let hello_msg_text = serde_json::to_string(&hello_msg)?;
         self.writer
-            .send(tungstenite::Message::Text(hello_msg_text))
+            .send(tungstenite::Message::Text(hello_msg_text.into()))
             .await?;
 
         let (tx, rx) = oneshot::channel();
@@ -145,21 +146,21 @@ impl LibSqlClient {
 
         let open_stream_text = serde_json::to_string(&open_stream_req)?;
         self.writer
-            .send(tungstenite::Message::Text(open_stream_text))
+            .send(tungstenite::Message::Text(open_stream_text.into()))
             .await?;
 
         let (tx, rx) = oneshot::channel();
         self.pending.insert(request_id, tx);
 
         match rx.await? {
-            ResponseType::OpenStreamResp {} => Ok(()),
+            ResponseType::OpenStreamResp => Ok(()),
             _ => Err(anyhow::anyhow!("Unexpected response for open_stream")),
         }
     }
 
     /// Measure latency in milliseconds
     pub async fn send_ping(&mut self) -> anyhow::Result<f32> {
-        self.writer.send(Message::Ping(vec![])).await?;
+        self.writer.send(Message::Ping(vec![].into())).await?;
         let (tx, rx) = oneshot::channel();
         self.pending.insert(PING_REQ_ID, tx);
         let now = Instant::now();
@@ -193,7 +194,7 @@ impl LibSqlClient {
 
         let execute_req_text = serde_json::to_string(&execute_req)?;
         self.writer
-            .send(tungstenite::Message::Text(execute_req_text))
+            .send(tungstenite::Message::Text(execute_req_text.into()))
             .await?;
 
         let (tx, rx) = oneshot::channel();
